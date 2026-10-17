@@ -2068,6 +2068,14 @@ static BOOLEAN btm_sec_is_upgrade_possible(tBTM_SEC_DEV_REC  *p_dev_rec, BOOLEAN
              * it probably would not want to upgrade the link key based on the security level database */
             is_possible = TRUE;
         }
+
+        /*if authentication is requirement & currently on temp bonding
+         * trigger pairing */
+        if ((p_dev_rec->security_required &
+            (is_originator ? BTM_SEC_OUT_AUTHENTICATE : BTM_SEC_IN_AUTHENTICATE)) &&
+             p_dev_rec->bond_type == BOND_TYPE_TEMPORARY) {
+            is_possible = TRUE;
+        }
     }
     BTM_TRACE_DEBUG ("%s() is_possible: %d sec_flags: 0x%x", __func__, is_possible, p_dev_rec->sec_flags);
     return is_possible;
@@ -5166,7 +5174,7 @@ static void btm_sec_pairing_timeout(UNUSED_ATTR void *data)
 */
     p_dev_rec = btm_find_dev (p_cb->pairing_bda);
 
-    BTM_TRACE_EVENT ("%s  State: %s   Flags: %u", __func__,
+    BTM_TRACE_WARNING ("%s  State: %s   Flags: %u", __func__,
                       btm_pair_state_descr(p_cb->pairing_state), p_cb->pairing_flags);
 
     switch (p_cb->pairing_state)
@@ -5242,6 +5250,10 @@ static void btm_sec_pairing_timeout(UNUSED_ATTR void *data)
             break;
 
         case BTM_PAIR_STATE_WAIT_AUTH_COMPLETE:
+            if (btm_cb.pairing_flags & BTM_PAIR_FLAGS_LE_ACTIVE) {
+                SMP_PairCancel(p_cb->pairing_bda);
+            }
+            /* Fallthrough intended */
         case BTM_PAIR_STATE_GET_REM_NAME:
             /* We need to notify the UI that timeout has happened while waiting for authentication*/
             btm_sec_change_pairing_state (BTM_PAIR_STATE_IDLE);

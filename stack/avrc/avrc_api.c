@@ -648,7 +648,9 @@ static void avrc_msg_cback(UINT8 handle, UINT8 label, UINT8 cr,
                                            __func__, p_pkt->len, AVRC_OP_UNIT_INFO_RSP_LEN);
                         android_errorWriteLog(0x534e4554, "79883824");
                         drop = true;
+#if (BT_USE_TRACES == TRUE)
                         p_drop_msg = "UNIT_INFO_RSP too short";
+#endif
                         break;
                     }
                     p_data += 4; /* 3 bytes: ctype, subunit*, opcode + octet 3 (is 7)*/
@@ -688,7 +690,9 @@ static void avrc_msg_cback(UINT8 handle, UINT8 label, UINT8 cr,
                                            __func__, p_pkt->len, AVRC_OP_SUB_UNIT_INFO_RSP_LEN);
                         android_errorWriteLog(0x534e4554, "79883824");
                         drop = true;
+#if (BT_USE_TRACES == TRUE)
                         p_drop_msg = "SUB_UNIT_INFO_RSP too short";
+#endif
                         break;
                     }
                     p_data += AVRC_AVC_HDR_SIZE; /* 3 bytes: ctype, subunit*, opcode */

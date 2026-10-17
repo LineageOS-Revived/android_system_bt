@@ -721,15 +721,15 @@ void smp_proc_init(tSMP_CB *p_cb, tSMP_INT_DATA *p_data)
         return;
     }
 
-   if (!((p_cb->loc_auth_req & SMP_SC_SUPPORT_BIT) &&
-         (p_cb->peer_auth_req & SMP_SC_SUPPORT_BIT)) &&
-       !(p_cb->flags & SMP_PAIR_FLAGS_CMD_CONFIRM_SENT))
-   {
-     // in legacy pairing, the peer should send its rand after
-     // we send our confirm
-     smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
-     return;
-   }
+    if (!((p_cb->loc_auth_req & SMP_SC_SUPPORT_BIT) &&
+          (p_cb->peer_auth_req & SMP_SC_SUPPORT_BIT)) &&
+        !(p_cb->flags & SMP_PAIR_FLAGS_CMD_CONFIRM_SENT))
+    {
+        // in legacy pairing, the peer should send its rand after
+        // we send our confirm
+        smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
+        return;
+    }
 
     /* save the SRand for comparison */
     STREAM_TO_ARRAY(p_cb->rrand, p, BT_OCTET16_LEN);
@@ -748,6 +748,16 @@ void smp_proc_rand(tSMP_CB *p_cb, tSMP_INT_DATA *p_data)
 
     if (smp_command_has_invalid_parameters(p_cb))
     {
+        smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
+        return;
+    }
+
+    if (!((p_cb->loc_auth_req & SMP_SC_SUPPORT_BIT) &&
+          (p_cb->peer_auth_req & SMP_SC_SUPPORT_BIT)) &&
+        !(p_cb->flags & SMP_PAIR_FLAGS_CMD_CONFIRM_SENT))
+    {
+        // in legacy pairing, the peer should send its rand after
+        // we send our confirm
         smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
         return;
     }
@@ -1190,6 +1200,8 @@ void smp_proc_srk_info(tSMP_CB *p_cb, tSMP_INT_DATA *p_data)
 
     smp_update_key_mask (p_cb, SMP_SEC_KEY_TYPE_CSRK, TRUE);
 
+    smp_key_distribution_by_transport(p_cb, NULL);
+
     /* save CSRK to security record */
     le_key.pcsrk_key.sec_level = p_cb->sec_level;
     memcpy (le_key.pcsrk_key.csrk, p_data, BT_OCTET16_LEN);   /* get peer CSRK */
@@ -1197,7 +1209,6 @@ void smp_proc_srk_info(tSMP_CB *p_cb, tSMP_INT_DATA *p_data)
 
     if ((p_cb->peer_auth_req & SMP_AUTH_BOND) && (p_cb->loc_auth_req & SMP_AUTH_BOND))
         btm_sec_save_le_key(p_cb->pairing_bda, BTM_LE_KEY_PCSRK, &le_key, TRUE);
-    smp_key_distribution_by_transport(p_cb, NULL);
 }
 
 /*******************************************************************************
@@ -2042,6 +2053,8 @@ void smp_process_secure_connection_oob_data(tSMP_CB *p_cb, tSMP_INT_DATA *p_data
 {
     SMP_TRACE_DEBUG("%s", __func__);
 
+    UINT8 reason;
+
     tSMP_SC_OOB_DATA *p_sc_oob_data = &p_cb->sc_oob_data;
     if (p_sc_oob_data->loc_oob_data.present)
     {
@@ -2052,6 +2065,16 @@ void smp_process_secure_connection_oob_data(tSMP_CB *p_cb, tSMP_INT_DATA *p_data
     {
         SMP_TRACE_EVENT ("local OOB randomizer is absent");
         memset(p_cb->local_random, 0, sizeof (p_cb->local_random));
+    }
+
+    if (p_cb->peer_oob_flag == SMP_OOB_PRESENT && !p_sc_oob_data->loc_oob_data.present)
+    {
+        SMP_TRACE_WARNING(
+            "local OOB data is not present but peer claims to have received it; dropping "
+            "connection", __func__);
+        reason = SMP_OOB_FAIL;
+        smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
+        return;
     }
 
     if (!p_sc_oob_data->peer_oob_data.present)
@@ -2066,7 +2089,7 @@ void smp_process_secure_connection_oob_data(tSMP_CB *p_cb, tSMP_INT_DATA *p_data
         memcpy(p_cb->remote_commitment, p_sc_oob_data->peer_oob_data.commitment,
                sizeof(p_cb->remote_commitment));
 
-        UINT8 reason = SMP_CONFIRM_VALUE_ERR;
+        reason = SMP_CONFIRM_VALUE_ERR;
         /* check commitment */
         if (!smp_check_commitment(p_cb))
         {

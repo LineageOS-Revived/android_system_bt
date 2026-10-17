@@ -165,9 +165,9 @@ static void sdp_snd_service_search_req(tCONN_CB *p_ccb, UINT8 cont_len, UINT8 * 
     /* Account for header size, max service record count and
      * continuation state */
     const UINT16 base_bytes = (sizeof(BT_HDR) + L2CAP_MIN_OFFSET +
-                                 3u + /* service search request header */
-                                 2u + /* param len */
-                                 3u + ((p_cont) ? cont_len : 0));
+                                 3u +        /* service search request header */
+                                 2u + 2u +   /* param len, max service records */
+                                 1u + ((p_cont) ? cont_len : 0));   /* continuation state */
 
     if (base_bytes > bytes_left) {
         SDP_TRACE_ERROR("SDP: Overran SDP data buffer");
@@ -567,6 +567,7 @@ static void process_service_attr_rsp (tCONN_CB* p_ccb, uint8_t* p_reply,
     {
         BT_HDR  *p_msg = (BT_HDR *)osi_malloc(SDP_DATA_BUF_SIZE);
         UINT8   *p;
+        UINT16  bytes_left = SDP_DATA_BUF_SIZE;
 
         p_msg->offset = L2CAP_MIN_OFFSET;
         p = p_start = (UINT8 *)(p_msg + 1) + L2CAP_MIN_OFFSET;
@@ -579,6 +580,18 @@ static void process_service_attr_rsp (tCONN_CB* p_ccb, uint8_t* p_reply,
         /* Skip the length, we need to add it at the end */
         p_param_len = p;
         p += 2;
+        /* Account for header size, handles, max attr count and continuation state */
+        const UINT16 base_bytes =
+                (sizeof(BT_HDR) + L2CAP_MIN_OFFSET + 3u + /* service attr request header */
+                 2u + 4u + 2u +                           /* param len, handles, max attr count */
+                 1u + ((p_reply) ? (*p_reply) : 0));      /* continuation state */
+
+        if (base_bytes > bytes_left) {
+          sdp_disconnect(p_ccb, SDP_INVALID_CONT_STATE);
+          osi_free(p_msg);
+          return;
+        }
+        bytes_left -= base_bytes;
 
         UINT32_TO_BE_STREAM (p, p_ccb->handles[p_ccb->cur_handle]);
 
@@ -587,9 +600,10 @@ static void process_service_attr_rsp (tCONN_CB* p_ccb, uint8_t* p_reply,
 
         /* If no attribute filters, build a wildcard attribute sequence */
         if (p_ccb->p_db->num_attr_filters)
-            p = sdpu_build_attrib_seq (p, p_ccb->p_db->attr_filters, p_ccb->p_db->num_attr_filters);
+            p = sdpu_build_attrib_seq (p, p_ccb->p_db->attr_filters,
+                                       p_ccb->p_db->num_attr_filters, &bytes_left);
         else
-            p = sdpu_build_attrib_seq (p, NULL, 0);
+            p = sdpu_build_attrib_seq (p, NULL, 0, &bytes_left);
 
         /* Was this a continuation request ? */
         if (cont_request_needed)
@@ -741,7 +755,8 @@ static void process_service_search_attr_rsp (tCONN_CB* p_ccb, uint8_t* p_reply,
         const UINT16 base_bytes = (sizeof(BT_HDR) + L2CAP_MIN_OFFSET +
                                      3u + /* service search request header */
                                      2u + /* param len */
-                                     3u + /* max service record count */
+				     2u + /* max attr count */
+                                     1u + /* continuation state */
                                      ((p_reply) ? (*p_reply) : 0));
 
         if (base_bytes > bytes_left) {
@@ -765,9 +780,10 @@ static void process_service_search_attr_rsp (tCONN_CB* p_ccb, uint8_t* p_reply,
 
         /* If no attribute filters, build a wildcard attribute sequence */
         if (p_ccb->p_db->num_attr_filters)
-            p = sdpu_build_attrib_seq (p, p_ccb->p_db->attr_filters, p_ccb->p_db->num_attr_filters);
+            p = sdpu_build_attrib_seq (p, p_ccb->p_db->attr_filters,
+                                       p_ccb->p_db->num_attr_filters, &bytes_left);
         else
-            p = sdpu_build_attrib_seq (p, NULL, 0);
+            p = sdpu_build_attrib_seq (p, NULL, 0, &bytes_left);
 
         /* No continuation for first request */
         if (p_reply)
@@ -991,6 +1007,12 @@ static UINT8 *add_attr (UINT8 *p, UINT8 *p_end, tSDP_DISCOVERY_DB *p_db, tSDP_DI
     UINT8           is_additional_list = nest_level & SDP_ADDITIONAL_LIST_MASK;
 
     nest_level &= ~(SDP_ADDITIONAL_LIST_MASK);
+
+    if (p + sizeof(uint8_t) > p_end)
+    {
+        SDP_TRACE_WARNING("bad arguments to add_addr", __func__);
+        return NULL;
+    }
 
     type = *p++;
     p = sdpu_get_len_from_type(p, p_end, type, &attr_len);
